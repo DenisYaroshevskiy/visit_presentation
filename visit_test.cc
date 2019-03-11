@@ -16,4 +16,12 @@ TEST_CASE("visit, simplified") {
   REQUIRE(!is_char);
 }
 
+TEST_CASE("visit, table, internal types") {
+  constexpr table<int, 3, 4, 2> t{};
+  static_assert(t.total_size == 3 * 4 * 2);
+  REQUIRE(t.multipliers_array == std::array<size_t, 3>{4 * 2, 2, 1});
+  static_assert(std::is_same_v<decltype(t)::multipliers_sequence,
+                               std::index_sequence<4 * 2, 2, 1>>);
+}
+
 }  // namespace tools
