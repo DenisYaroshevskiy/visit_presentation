@@ -1,4 +1,5 @@
 #include <array>
+#include <numeric>
 #include <variant>
 
 namespace tools {
@@ -27,54 +28,10 @@ constexpr void visit(F f, const std::variant<Ts...>& v) {
 }
 
 }  // namespace simplified
-/*
-template <typename T, size_t size>
-struct array {
-  T data[size];
-
-  using iterator = T*;
-  using const_iterator = const T*;
-  using reverse_iterator = std::reverse_iterator<iterator>;
-  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
-
-  using reference = T&;
-  using const_reference = const T&;
-
-  constexpr iterator begin() { return data; }
-  constexpr const_iterator begin() const { return data; }
-  constexpr const_iterator cbegin() const { return begin(); }
-
-  constexpr iterator end() { return data + size; }
-  constexpr const_iterator end() const { return data + size; }
-  constexpr const_iterator cend() const { return end(); }
-
-  constexpr reverse_iterator rbegin() { return reverse_iterator{end()}; }
-  constexpr const_reverse_iterator rbegin() const {
-    return reverse_iterator{end()};
-  }
-  constexpr const_reverse_iterator crbegin() const {
-    return reverse_iterator{end()};
-  }
-
-  constexpr reverse_iterator rend() { return reverse_iterator{begin()}; }
-  constexpr const_reverse_iterator rend() const {
-    return reverse_iterator{begin()};
-  }
-  constexpr const_reverse_iterator crend() const {
-    return reverse_iterator{begin()};
-  }
-
-  reference operator[](size_t idx) { return data[idx]; }
-  const_reference operator[](size_t idx) const { return data[idx]; }
-};
-
-template <class T, class... U>
-array(T, U...)->array<T, 1 + sizeof...(U)>;
-*/
 
 // Very similar to std::partial_sum
 template <typename I, typename O, typename V, typename Op>
-constexpr O running_sum(I f, I l, O o, V sum, Op op) {
+constexpr O running_sum_shifted(I f, I l, O o, V sum, Op op) {
   while (f != l) {
     auto tmp = op(sum, *f++);
     *o++ = std::move(sum);
@@ -83,10 +40,38 @@ constexpr O running_sum(I f, I l, O o, V sum, Op op) {
   return o;
 }
 
+// std::inner_product but constexpr
+template <class InputIt1, class InputIt2, class T>
+constexpr T inner_product(InputIt1 first1,
+                          InputIt1 last1,
+                          InputIt2 first2,
+                          T init) {
+  while (first1 != last1) {
+    init = std::move(init) + *first1 * *first2;  // std::move since C++20
+    ++first1;
+    ++first2;
+  }
+  return init;
+}
+
 template <size_t... dimensions>
-constexpr auto compute_multipliers_as_array() {
+constexpr auto compute_multipliers_array() {
   std::array res{dimensions...};
-  running_sum(res.rbegin(), res.rend(), res.rbegin(), 1, std::multiplies<>{});
+  running_sum_shifted(res.rbegin(), res.rend(), res.rbegin(), 1,
+                      std::multiplies<>{});
+  return res;
+}
+
+template <size_t size>
+inline constexpr auto to_multi_dimensional_array_helper(
+    size_t idx,
+    const std::array<size_t, size>& multipliers) {
+  std::array res = multipliers;
+  for (auto i = res.rbegin(); i != res.rend(); ++i) {
+    size_t next_idx = idx / *i;
+    *i = idx % *i;
+    idx = next_idx;
+  }
   return res;
 }
 
@@ -95,17 +80,86 @@ struct table {
   static constexpr size_t total_size = (dimensions * ...);
 
   static constexpr std::array multipliers_array =
-      compute_multipliers_as_array<dimensions...>();
+      compute_multipliers_array<dimensions...>();
 
-  template <size_t... idxs>
-  static constexpr auto multipliers_sequence_helper(std::index_sequence<idxs...>) {
-    return std::index_sequence<multipliers_array[idxs]...>{};
+  template <size_t... from0_to_n>
+  static constexpr auto multipliers_sequence_helper(
+      std::index_sequence<from0_to_n...>) {
+    return std::index_sequence<multipliers_array[from0_to_n]...>{};
   }
 
   using multipliers_sequence = decltype(multipliers_sequence_helper(
       std::make_index_sequence<sizeof...(dimensions)>{}));
 
+  static constexpr size_t to_one_dimensional(
+      std::array<size_t, sizeof...(dimensions)> idxes) {
+    return inner_product(idxes.begin(), idxes.end(), multipliers_array.begin(),
+                         0);
+  }
+
+  template <size_t... idxes>
+  static constexpr size_t to_one_dimensional(std::index_sequence<idxes...>) {
+    return to_one_dimensional(std::array{idxes...});
+  }
+
+  template <size_t idx>
+  static constexpr auto to_multy_dimensional_array =
+      to_multi_dimensional_array_helper(idx, multipliers_array);
+
+  template <size_t idx, size_t... from0_to_n>
+  static constexpr auto to_multi_dimensional_sequence_helper(
+      std::index_sequence<from0_to_n...>) {
+    return std::index_sequence<
+        to_multy_dimensional_array<idx>[from0_to_n]...>{};
+  }
+
+  template <size_t idx>
+  using to_multi_dimensional_sequence =
+      decltype(to_multi_dimensional_sequence_helper<idx>(
+          std::make_index_sequence<sizeof...(dimensions)>{}));
+
   std::array<T, total_size> data;
+
+  constexpr T& operator[](std::array<size_t, sizeof...(dimensions)> idxs) {
+    return data[to_one_dimensional(idxs)];
+  }
+
+  constexpr const T& operator[](
+      std::array<size_t, sizeof...(dimensions)> idxs) const {
+    return data[to_one_dimensional(idxs)];
+  }
+
+  template <size_t... idxs>
+  constexpr T& operator[](std::index_sequence<idxs...> _idxs) {
+    return data[to_one_dimensional(_idxs)];
+  }
+
+  template <size_t... idxs>
+  constexpr const T& operator[](std::index_sequence<idxs...> _idxs) const {
+    return data[to_one_dimensional(_idxs)];
+  }
 };
+
+template <size_t idx, typename Table, typename OutTable, typename Op>
+constexpr void table_map_one_helper(const Table& t, OutTable& out_table, Op op) {
+  using multi_index = typename Table::template to_multi_dimensional_sequence<idx>;
+  out_table.data[idx] = op(multi_index{}, t.data[idx]);
+}
+
+template <typename Table, typename OutTable, typename Op, size_t... from0_to_n>
+constexpr void table_map_helper(const Table& t,
+                                OutTable& out_table,
+                                Op op,
+                                std::index_sequence<from0_to_n...>) {
+  (table_map_one_helper<from0_to_n>(t, out_table, op), ...);
+}
+
+template <typename T, typename Op, size_t... dimensions>
+constexpr auto table_map(table<T, dimensions...> t, Op op) {
+  using U = decltype(op(std::index_sequence<dimensions - 1 ...>{}, t.data[0]));
+  table<U, dimensions...> res{};
+  table_map_helper(t, res, op, std::make_index_sequence<t.data.size()>{});
+  return res;
+}
 
 }  // namespace tools
