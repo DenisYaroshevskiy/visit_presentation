@@ -54,6 +54,18 @@ constexpr T inner_product(InputIt1 first1,
   return init;
 }
 
+// There is no such thing in mathematics but for our case
+// this works
+template <typename I, typename O, typename T>
+constexpr O inner_product_inverse(I f, I l, O o, T product) {
+  while (f != l) {
+    *o++ = product / *f;
+    product %= *f;
+    ++f;
+  }
+  return o;
+}
+
 template <size_t... dimensions>
 constexpr auto compute_multipliers_array() {
   std::array res{dimensions...};
@@ -66,12 +78,9 @@ template <size_t size>
 inline constexpr auto to_multi_dimensional_array_helper(
     size_t idx,
     const std::array<size_t, size>& multipliers) {
-  std::array res = multipliers;
-  for (auto i = res.rbegin(); i != res.rend(); ++i) {
-    size_t next_idx = idx / *i;
-    *i = idx % *i;
-    idx = next_idx;
-  }
+  auto res = multipliers;
+  inner_product_inverse(multipliers.begin(), multipliers.end(),
+                        res.begin(), idx);
   return res;
 }
 
