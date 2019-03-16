@@ -96,10 +96,7 @@ struct P {
 TEST_CASE("visit, table, public") {
   using test_t = P<size_t>;
 
-  constexpr table<test_t, 2, 3> t{};
-
-  constexpr auto init =
-      table_map(t, [](auto seq, test_t) { return test_t{seq}; });
+  constexpr auto init = make_table<2, 3>([](auto seq) { return test_t{seq}; });
 
   static_assert(init[std::index_sequence<0, 2>{}] == test_t{0, 2});
   static_assert(init[std::index_sequence<1, 1>{}] == test_t{1, 1});
@@ -115,6 +112,33 @@ TEST_CASE("visit, table, public") {
 
   REQUIRE(std::all_of(check.data.begin(), check.data.end(),
                       [](bool x) { return x; }));
+}
+
+TEST_CASE("visit, visit with R") {
+  {
+    using test_t = std::variant<int, char>;
+
+    constexpr auto visitor =
+        overload{[](int, int) { return 0; }, [](int, char) { return 1; },
+                 [](char, int) { return 2; }, [](char, char) { return 3; }};
+
+    static_assert(visit_with_r<int>(visitor, test_t{3}, test_t{'a'}) == 1);
+  }
+  {
+    struct Throws {
+      Throws() { throw std::runtime_error("aaaa"); }
+    };
+
+    std::variant<Throws, int> v{3};
+    try {
+      v.emplace<Throws>();
+    } catch (...) {}
+
+    try {
+      visit_with_r<void>([](const auto&) { }, v);
+      REQUIRE(false);
+    } catch (const std::bad_variant_access&) {}
+  }
 }
 
 }  // namespace tools

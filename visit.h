@@ -1,5 +1,6 @@
 #include <array>
 #include <numeric>
+#include <type_traits>
 #include <variant>
 
 namespace tools {
@@ -62,27 +63,28 @@ template <typename I>
 class varying_notation {
   I f_;
   I l_;
+
  public:
-   constexpr varying_notation(I f, I l) : f_(f), l_(l) {}
+  constexpr varying_notation(I f, I l) : f_{f}, l_{l} {}
 
-   template <typename T, typename O>
-   // requires Number<T>
-   constexpr O to(T number, O o) const {
-     for (I f = f_; f != l_; ++f) {
-       *o++ = number / *f;
-       number %= *f;
-     }
-     return o;
-   }
+  template <typename T, typename O>
+  // requires Number<T>
+  constexpr O to(T number, O o) const {
+    for (I f = f_; f != l_; ++f) {
+      *o++ = number / *f;
+      number %= *f;
+    }
+    return o;
+  }
 
-   template <typename I2>
-   // requires InputIterator<I2>
-   constexpr ValueType<I2> from(I2 f, I2 l) const {
-     return inner_product(f, l, f_, ValueType<I2>{0});
-   }
+  template <typename I2>
+  // requires InputIterator<I2>
+  constexpr ValueType<I2> from(I2 f, I2 l) const {
+    return inner_product(f, l, f_, ValueType<I2>{0});
+  }
 };
 
-template <size_t ... dims>
+template <size_t... dims>
 constexpr auto compute_multipliers_a() {
   std::array res{dims...};
   running_sum_shifted(res.rbegin(), res.rend(), res.rbegin(), 1,
@@ -90,23 +92,23 @@ constexpr auto compute_multipliers_a() {
   return res;
 }
 
-template <size_t ... dims>
+template <size_t... dims>
 struct table_index_math {
   using index_a = std::array<size_t, sizeof...(dims)>;
 
-  template <size_t ... idxs>
+  template <size_t... idxs>
   using index_s = std::index_sequence<idxs...>;
 
   static constexpr size_t size_linear = (dims * ...);
   static constexpr std::array multipliers_a = compute_multipliers_a<dims...>();
-  static constexpr varying_notation notation{
-    std::begin(multipliers_a), std::end(multipliers_a)};
+  static constexpr varying_notation notation{std::begin(multipliers_a),
+                                             std::end(multipliers_a)};
 
   static constexpr size_t as_linear(const index_a& arr) {
     return notation.from(arr.begin(), arr.end());
   }
 
-  template <size_t ... idxs>
+  template <size_t... idxs>
   static constexpr size_t as_linear(const index_s<idxs...>&) {
     return as_linear(index_a{idxs...});
   }
@@ -117,7 +119,7 @@ struct table_index_math {
     return res;
   }
 
-  template <size_t idx, size_t ... from0_to_n>
+  template <size_t idx, size_t... from0_to_n>
   static constexpr auto as_multi_s_helper(std::index_sequence<from0_to_n...>) {
     constexpr index_a as_a = as_multi_a(idx);
     return index_s<as_a[from0_to_n]...>{};
@@ -135,17 +137,16 @@ struct table : table_index_math<dims...> {
 
   using index_a = typename table_index_math<dims...>::index_a;
 
-  template <size_t ...idxs>
-  using index_s =
-    typename table_index_math<dims...>::template index_s<idxs...>;
+  template <size_t... idxs>
+  using index_s = typename table_index_math<dims...>::template index_s<idxs...>;
 
   std::array<T, size_linear> data;
 
-  constexpr T& operator[](index_a idxs) {
+  constexpr T& operator[](const index_a& idxs) {
     return data[this->as_linear(idxs)];
   }
 
-  constexpr const T& operator[](index_a idxs) const {
+  constexpr const T& operator[](const index_a& idxs) const {
     return data[this->as_linear(idxs)];
   }
 
@@ -165,18 +166,56 @@ constexpr void table_map_helper(const Table& t,
                                 OutTable& out_table,
                                 Op op,
                                 std::index_sequence<from0_to_n...>) {
-  ([&]{
-    constexpr auto multi_s = Table::template as_multi_s<from0_to_n>();
-    out_table.data[from0_to_n] = op(multi_s, t.data[from0_to_n]);
-  }(), ...);
+  (
+      [&] {
+        constexpr auto multi_s = Table::template as_multi_s<from0_to_n>();
+        out_table.data[from0_to_n] = op(multi_s, t.data[from0_to_n]);
+      }(),
+      ...);
 }
 
-template <typename T, typename Op, size_t... dimensions>
-constexpr auto table_map(table<T, dimensions...> t, Op op) {
-  using U = decltype(op(std::index_sequence<dimensions - 1 ...>{}, t.data[0]));
-  table<U, dimensions...> res{};
+template <typename T, size_t... dims, typename Op>
+constexpr auto table_map(table<T, dims...> t, Op op) {
+  using U = decltype(op(std::index_sequence<dims - 1 ...>{}, t.data[0]));
+  table<U, dims...> res{};
   table_map_helper(t, res, op, std::make_index_sequence<t.data.size()>{});
   return res;
+}
+
+template <size_t... dims, typename Op>
+constexpr auto make_table(Op op) {
+  return table_map(table<int, dims...>{},
+                   [&](auto seq, int) { return op(seq); });
+}
+
+template <typename R, typename FwdOp, typename... FwdVs>
+struct visit_vtable_generator {
+  using vtable_element = R (*)(FwdOp, FwdVs...);
+
+  template <size_t... idxs>
+  constexpr vtable_element operator()(std::index_sequence<idxs...>) const {
+    return [](FwdOp op, FwdVs... vs) -> R {
+      return std::invoke(std::forward<FwdOp>(op),
+                         std::get<idxs>(std::forward<FwdVs>(vs))...);
+    };
+  }
+};
+
+template <typename R, typename Op, typename... Vs>
+constexpr R visit_with_r(Op&& op, Vs&&... vs) {
+  constexpr visit_vtable_generator<R, decltype(std::forward<Op>(op)),
+                                   decltype(std::forward<Vs>(vs))...>
+      vtable_generator;
+
+  constexpr auto vtable =
+      make_table<std::variant_size_v<std::decay_t<Vs>>...>(vtable_generator);
+
+  size_t idx = vtable.as_linear({vs.index()...});
+  if (idx >= vtable.size_linear) {
+    throw std::bad_variant_access{};
+  }
+
+  return vtable.data[idx](std::forward<Op>(op), std::forward<Vs>(vs)...);
 }
 
 }  // namespace tools
