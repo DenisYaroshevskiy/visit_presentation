@@ -54,113 +54,121 @@ constexpr T inner_product(InputIt1 first1,
   return init;
 }
 
-// There is no such thing in mathematics but for our case
-// this works
-template <typename I, typename O, typename T>
-constexpr O inner_product_inverse(I f, I l, O o, T product) {
-  while (f != l) {
-    *o++ = product / *f;
-    product %= *f;
-    ++f;
-  }
-  return o;
-}
+template <typename I>
+using ValueType = typename std::iterator_traits<I>::value_type;
 
-template <size_t... dimensions>
-constexpr auto compute_multipliers_array() {
-  std::array res{dimensions...};
+template <typename I>
+// requires InputIterator<I>
+class varying_notation {
+  I f_;
+  I l_;
+ public:
+   constexpr varying_notation(I f, I l) : f_(f), l_(l) {}
+
+   template <typename T, typename O>
+   // requires Number<T>
+   constexpr O to(T number, O o) const {
+     for (I f = f_; f != l_; ++f) {
+       *o++ = number / *f;
+       number %= *f;
+     }
+     return o;
+   }
+
+   template <typename I2>
+   // requires InputIterator<I2>
+   constexpr ValueType<I2> from(I2 f, I2 l) const {
+     return inner_product(f, l, f_, ValueType<I2>{0});
+   }
+};
+
+template <size_t ... dims>
+constexpr auto compute_multipliers_a() {
+  std::array res{dims...};
   running_sum_shifted(res.rbegin(), res.rend(), res.rbegin(), 1,
                       std::multiplies<>{});
   return res;
 }
 
-template <size_t size>
-inline constexpr auto to_multi_dimensional_array_helper(
-    size_t idx,
-    const std::array<size_t, size>& multipliers) {
-  auto res = multipliers;
-  inner_product_inverse(multipliers.begin(), multipliers.end(),
-                        res.begin(), idx);
-  return res;
-}
+template <size_t ... dims>
+struct table_index_math {
+  using index_a = std::array<size_t, sizeof...(dims)>;
 
-template <typename T, size_t... dimensions>
-struct table {
-  static constexpr size_t total_size = (dimensions * ...);
+  template <size_t ... idxs>
+  using index_s = std::index_sequence<idxs...>;
 
-  static constexpr std::array multipliers_array =
-      compute_multipliers_array<dimensions...>();
+  static constexpr size_t size_linear = (dims * ...);
+  static constexpr std::array multipliers_a = compute_multipliers_a<dims...>();
+  static constexpr varying_notation notation{
+    std::begin(multipliers_a), std::end(multipliers_a)};
 
-  template <size_t... from0_to_n>
-  static constexpr auto multipliers_sequence_helper(
-      std::index_sequence<from0_to_n...>) {
-    return std::index_sequence<multipliers_array[from0_to_n]...>{};
+  static constexpr size_t as_linear(const index_a& arr) {
+    return notation.from(arr.begin(), arr.end());
   }
 
-  using multipliers_sequence = decltype(multipliers_sequence_helper(
-      std::make_index_sequence<sizeof...(dimensions)>{}));
-
-  static constexpr size_t to_one_dimensional(
-      std::array<size_t, sizeof...(dimensions)> idxes) {
-    return inner_product(idxes.begin(), idxes.end(), multipliers_array.begin(),
-                         0);
+  template <size_t ... idxs>
+  static constexpr size_t as_linear(const index_s<idxs...>&) {
+    return as_linear(index_a{idxs...});
   }
 
-  template <size_t... idxes>
-  static constexpr size_t to_one_dimensional(std::index_sequence<idxes...>) {
-    return to_one_dimensional(std::array{idxes...});
+  static constexpr auto as_multi_a(size_t idx) {
+    index_a res{};
+    notation.to(idx, res.begin());
+    return res;
+  }
+
+  template <size_t idx, size_t ... from0_to_n>
+  static constexpr auto as_multi_s_helper(std::index_sequence<from0_to_n...>) {
+    constexpr index_a as_a = as_multi_a(idx);
+    return index_s<as_a[from0_to_n]...>{};
   }
 
   template <size_t idx>
-  static constexpr auto to_multy_dimensional_array =
-      to_multi_dimensional_array_helper(idx, multipliers_array);
-
-  template <size_t idx, size_t... from0_to_n>
-  static constexpr auto to_multi_dimensional_sequence_helper(
-      std::index_sequence<from0_to_n...>) {
-    return std::index_sequence<
-        to_multy_dimensional_array<idx>[from0_to_n]...>{};
-  }
-
-  template <size_t idx>
-  using to_multi_dimensional_sequence =
-      decltype(to_multi_dimensional_sequence_helper<idx>(
-          std::make_index_sequence<sizeof...(dimensions)>{}));
-
-  std::array<T, total_size> data;
-
-  constexpr T& operator[](std::array<size_t, sizeof...(dimensions)> idxs) {
-    return data[to_one_dimensional(idxs)];
-  }
-
-  constexpr const T& operator[](
-      std::array<size_t, sizeof...(dimensions)> idxs) const {
-    return data[to_one_dimensional(idxs)];
-  }
-
-  template <size_t... idxs>
-  constexpr T& operator[](std::index_sequence<idxs...> _idxs) {
-    return data[to_one_dimensional(_idxs)];
-  }
-
-  template <size_t... idxs>
-  constexpr const T& operator[](std::index_sequence<idxs...> _idxs) const {
-    return data[to_one_dimensional(_idxs)];
-  }
+  static constexpr auto as_multi_s() {
+    return as_multi_s_helper<idx>(std::make_index_sequence<sizeof...(dims)>{});
+  };
 };
 
-template <size_t idx, typename Table, typename OutTable, typename Op>
-constexpr void table_map_one_helper(const Table& t, OutTable& out_table, Op op) {
-  using multi_index = typename Table::template to_multi_dimensional_sequence<idx>;
-  out_table.data[idx] = op(multi_index{}, t.data[idx]);
-}
+template <typename T, size_t... dims>
+struct table : table_index_math<dims...> {
+  static constexpr size_t size_linear = table_index_math<dims...>::size_linear;
+
+  using index_a = typename table_index_math<dims...>::index_a;
+
+  template <size_t ...idxs>
+  using index_s =
+    typename table_index_math<dims...>::template index_s<idxs...>;
+
+  std::array<T, size_linear> data;
+
+  constexpr T& operator[](index_a idxs) {
+    return data[this->as_linear(idxs)];
+  }
+
+  constexpr const T& operator[](index_a idxs) const {
+    return data[this->as_linear(idxs)];
+  }
+
+  template <size_t... _idxs>
+  constexpr T& operator[](index_s<_idxs...> idxs) {
+    return data[this->as_linear(idxs)];
+  }
+
+  template <size_t... _idxs>
+  constexpr const T& operator[](index_s<_idxs...> idxs) const {
+    return data[this->as_linear(idxs)];
+  }
+};
 
 template <typename Table, typename OutTable, typename Op, size_t... from0_to_n>
 constexpr void table_map_helper(const Table& t,
                                 OutTable& out_table,
                                 Op op,
                                 std::index_sequence<from0_to_n...>) {
-  (table_map_one_helper<from0_to_n>(t, out_table, op), ...);
+  ([&]{
+    constexpr auto multi_s = Table::template as_multi_s<from0_to_n>();
+    out_table.data[from0_to_n] = op(multi_s, t.data[from0_to_n]);
+  }(), ...);
 }
 
 template <typename T, typename Op, size_t... dimensions>
