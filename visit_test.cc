@@ -93,7 +93,7 @@ struct P {
   }
 };
 
-TEST_CASE("visit, table, public") {
+TEST_CASE("visit, table") {
   using test_t = P<size_t>;
 
   constexpr auto init = make_table<2, 3>([](auto seq) { return test_t{seq}; });
@@ -112,6 +112,24 @@ TEST_CASE("visit, table, public") {
 
   REQUIRE(std::all_of(check.data.begin(), check.data.end(),
                       [](bool x) { return x; }));
+}
+
+TEST_CASE("visit, type_table_helpers") {
+  is_same_test(any_typelist_helper(std::index_sequence<0, 1, 2>{}),
+               type_list<size_t, size_t, size_t>{});
+  is_same_test(any_type_table_helper<2, 2>(),
+               type_table<type_list<size_t, size_t, size_t, size_t>, 2, 2>{});
+  auto mapped = table_map(any_type_table_helper<2, 2>(), [](auto, auto) -> size_t { return 0u; });
+  is_same_test(decltype(mapped)::data{}, type_list<size_t, size_t, size_t, size_t>{});
+}
+
+TEST_CASE("visit, type_table") {
+  constexpr auto ttable = make_type_table<2, 3>([](auto seq) {
+    return std::index_sequence<get<0>(seq), get<1>(seq)>{};
+  });
+
+  is_same_test(get<0>(ttable), type_t<std::index_sequence<0, 0>>{});
+  is_same_test(get<3>(ttable), type_t<std::index_sequence<1, 0>>{});
 }
 
 TEST_CASE("visit, visit with R") {

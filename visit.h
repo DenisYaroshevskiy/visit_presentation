@@ -84,6 +84,29 @@ class varying_notation {
   }
 };
 
+template <typename T>
+struct type_t {
+  using type = T;
+};
+
+template <typename T, size_t>
+struct indexed_t {};
+
+template <typename...>
+struct type_list_impl;
+
+template <size_t... idxs, typename... Ts>
+struct type_list_impl<std::index_sequence<idxs...>, Ts...>
+    : indexed_t<Ts, idxs>... {};
+
+template <typename... Ts>
+using type_list = type_list_impl<std::index_sequence_for<Ts...>, Ts...>;
+
+template <size_t I, typename T>
+constexpr type_t<T> get(const indexed_t<T, I>&) {
+  return {};
+}
+
 template <size_t... dims>
 constexpr auto compute_multipliers_a() {
   std::array res{dims...};
@@ -188,6 +211,52 @@ constexpr auto make_table(Op op) {
                    [&](auto seq, int) { return op(seq); });
 }
 
+template <typename TypeList, size_t... dims>
+struct type_table : TypeList, table_index_math<dims...> {
+  using data = TypeList;
+
+  template <typename UTypeList>
+  using same_dims_table = type_table<UTypeList, dims...>;
+};
+
+template <typename Table, typename Op, size_t... from0_to_n>
+constexpr auto type_table_map_helper(Table,
+                                     Op op,
+                                     std::index_sequence<from0_to_n...>) {
+  using UTypeList = type_list<decltype(op(
+      Table::template as_multi_s<from0_to_n>(), get<from0_to_n>(Table{})))...>;
+  return typename Table::template same_dims_table<UTypeList>{};
+}
+
+template <typename TypeList, size_t... dims, typename Op>
+constexpr auto table_map(type_table<TypeList, dims...> t, Op op) {
+  return type_table_map_helper(t, op,
+                               std::make_index_sequence<t.size_linear>{});
+}
+
+template <size_t... from0_to_n>
+constexpr auto any_typelist_helper(std::index_sequence<from0_to_n...>) {
+  return type_list<decltype(from0_to_n)...>{};
+}
+
+template <size_t... dims, typename TypeList>
+constexpr auto any_type_table_type_list_and_dims_helper(TypeList) {
+  return type_table<TypeList, dims...>{};
+}
+
+template <size_t... dims>
+constexpr auto any_type_table_helper() {
+  constexpr table_index_math<dims...> math{};
+  return any_type_table_type_list_and_dims_helper<dims...>(
+      any_typelist_helper(std::make_index_sequence<math.size_linear>{}));
+}
+
+template <size_t... dims, typename Op>
+constexpr auto make_type_table(Op op) {
+  return table_map(any_type_table_helper<dims...>(),
+                   [&](auto seq, auto) { return op(seq); });
+}
+
 template <typename R, typename FwdOp, typename... FwdVs>
 struct visit_vtable_generator {
   using vtable_element = R (*)(FwdOp, FwdVs...);
@@ -195,8 +264,8 @@ struct visit_vtable_generator {
   template <size_t... idxs>
   constexpr vtable_element operator()(std::index_sequence<idxs...>) const {
     return [](FwdOp op, FwdVs... vs) -> R {
-      return std::invoke(std::forward<FwdOp>(op),
-                         std::get<idxs>(std::forward<FwdVs>(vs))...);
+      return std::forward<FwdOp>(op)(
+          std::get<idxs>(std::forward<FwdVs>(vs))...);
     };
   }
 };
