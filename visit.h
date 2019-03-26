@@ -99,6 +99,8 @@ struct type_t {
   using type = T;
 };
 
+struct null_t {};
+
 template <typename T, size_t>
 struct indexed_t {};
 
@@ -112,9 +114,19 @@ struct type_list_impl<std::index_sequence<idxs...>, Ts...>
 template <typename... Ts>
 struct type_list : type_list_impl<std::index_sequence_for<Ts...>, Ts...> {};
 
+template <typename, typename = void>
+struct common_type_impl {
+  using type = null_t;
+};
+
 template <typename ...Ts>
-auto common_type(type_list<Ts...>) {
-  return type_t<std::common_type_t<Ts...>>{};
+struct common_type_impl<type_list<Ts...>, std::void_t<std::common_type_t<Ts...>>> {
+  using type = type_t<std::common_type_t<Ts...>>;
+};
+
+template <typename ...Ts>
+auto common_type(type_list<Ts...> t) {
+  return typename common_type_impl<type_list<Ts...>>::type{};
 }
 
 template <size_t I, typename T>
@@ -367,7 +379,11 @@ template <typename FwdOp, typename ...FwdVs>
 struct visit_return_type_mapper {
   template <size_t ...idxs>
   constexpr auto operator()(std::index_sequence<idxs...>) {
-    return type_t<decltype(std::declval<FwdOp>()(std::declval<FwdVs>()...))>{};
+    if constexpr (!std::is_invokable_v<FwdOp, FwdVs...>) {
+      return null_t{};
+    } else {
+      return type_t<decltype(std::declval<FwdOp>()(std::declval<FwdVs>()...))>{};
+    }
   }
 };
 

@@ -123,6 +123,12 @@ TEST_CASE("visit, type_table_helpers") {
   is_same_test(decltype(mapped)::data{}, type_list<size_t, size_t, size_t, size_t>{});
 }
 
+TEST_CASE("visit, common_type") {
+  struct A {};
+  is_same_test(common_type(type_list<int, A>{}), null_t{});
+  is_same_test(common_type(type_list<int, char>{}), type_t<int>{});
+}
+
 TEST_CASE("visit, type_table") {
   {
     constexpr auto ttable = make_type_table<2, 3>([](auto seq) {
@@ -135,7 +141,7 @@ TEST_CASE("visit, type_table") {
   {
     constexpr auto t = make_type_table<2, 3>([](auto) { return type_t<int>{}; });
 
-     is_same_test(typename decltype(common_type(t))::type{}, int{});
+    is_same_test(typename decltype(common_type(t))::type{}, int{});
   }
 }
 
