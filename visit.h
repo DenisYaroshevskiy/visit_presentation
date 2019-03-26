@@ -55,6 +55,16 @@ constexpr T inner_product(InputIt1 first1,
   return init;
 }
 
+template <typename I, typename P>
+constexpr bool all_of(I f, I l, P p) {
+  while (f != l) {
+    if (!p(*f++)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 template <typename I>
 using ValueType = typename std::iterator_traits<I>::value_type;
 
@@ -100,7 +110,12 @@ struct type_list_impl<std::index_sequence<idxs...>, Ts...>
     : indexed_t<Ts, idxs>... {};
 
 template <typename... Ts>
-using type_list = type_list_impl<std::index_sequence_for<Ts...>, Ts...>;
+struct type_list : type_list_impl<std::index_sequence_for<Ts...>, Ts...> {};
+
+template <typename ...Ts>
+auto common_type(type_list<Ts...>) {
+  return type_t<std::common_type_t<Ts...>>{};
+}
 
 template <size_t I, typename T>
 constexpr type_t<T> get(const indexed_t<T, I>&) {
@@ -223,8 +238,9 @@ template <typename Table, typename Op, size_t... from0_to_n>
 constexpr auto type_table_map_helper(Table,
                                      Op op,
                                      std::index_sequence<from0_to_n...>) {
-  using UTypeList = type_list<decltype(op(
-      Table::template as_multi_s<from0_to_n>(), get<from0_to_n>(Table{})))...>;
+  using UTypeList = type_list<
+    typename decltype(op(
+      Table::template as_multi_s<from0_to_n>(), get<from0_to_n>(Table{})))::type...>;
   return typename Table::template same_dims_table<UTypeList>{};
 }
 
@@ -286,5 +302,86 @@ constexpr R visit_with_r(Op&& op, Vs&&... vs) {
 
   return vtable.data[idx](std::forward<Op>(op), std::forward<Vs>(vs)...);
 }
+
+template <typename T>
+struct is_variant : std::false_type {};
+
+template <typename... Ts>
+struct is_variant<std::variant<Ts...>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_variant_v = is_variant<T>::value;
+
+template <typename FwdOp, typename... FwdVs>
+struct should_enable_visit_no_r_helper {
+  template <size_t... idxs>
+  constexpr bool operator()(std::index_sequence<idxs...>) {
+    return std::is_invocable_v<FwdOp, decltype(std::get<idxs>(
+                                          std::declval<FwdVs>()))...>;
+  }
+};
+
+template <typename FwdOp, typename... FwdVs>
+constexpr bool should_enable_visit_no_r() {
+  if constexpr (!sizeof...(FwdVs) ||(!is_variant_v<std::decay_t<FwdVs>> || ...)) {
+    return false;
+  } else {
+    constexpr should_enable_visit_no_r_helper<FwdOp, FwdVs...> helper;
+
+    constexpr auto for_each_scenario =
+        make_table<std::variant_size_v<std::decay_t<FwdVs>>...>(helper);
+
+    return tools::all_of(for_each_scenario.data.begin(),
+                         for_each_scenario.data.end(),
+                         [](bool x) { return x; });
+  }
+}
+
+template <typename R, typename FwdOp, typename... FwdVs>
+struct should_enable_visit_r_helper {
+  template <size_t... idxs>
+  constexpr bool operator()(std::index_sequence<idxs...>) {
+    return std::is_invocable_r_v<R, FwdOp, decltype(std::get<idxs>(
+                                          std::declval<FwdVs>()))...>;
+  }
+};
+
+template <typename R, typename FwdOp, typename ...FwdVs>
+constexpr bool should_enable_visit_r() {
+  if constexpr (!sizeof...(FwdVs) ||(!is_variant_v<std::decay_t<FwdVs>> || ...)) {
+    return false;
+  } else {
+    constexpr should_enable_visit_r_helper<R, FwdOp, FwdVs...> helper;
+
+    constexpr auto for_each_scenario =
+        make_table<std::variant_size_v<std::decay_t<FwdVs>>...>(helper);
+
+    return tools::all_of(for_each_scenario.data.begin(),
+                         for_each_scenario.data.end(),
+                         [](bool x) { return x; });
+  }
+}
+
+
+template <typename FwdOp, typename ...FwdVs>
+struct visit_return_type_mapper {
+  template <size_t ...idxs>
+  constexpr auto operator()(std::index_sequence<idxs...>) {
+    return type_t<decltype(std::declval<FwdOp>()(std::declval<FwdVs>()...))>{};
+  }
+};
+
+template <typename FwdOp, typename ...FwdVs>
+constexpr auto visit_return_types_helper () {
+  constexpr visit_return_type_mapper<FwdOp, FwdVs...> mapper;
+  constexpr auto result_table = make_type_table<
+      std::variant_size_v<std::decay_t<FwdVs>>...
+    >(mapper);
+  return tools::common_type(typename decltype(result_table)::data{});
+}
+
+template <typename FwdOp, typename ...FwdVs>
+using visit_return_type = typename decltype((visit_return_types_helper<FwdOp, FwdVs...>()))::type;
+
 
 }  // namespace tools

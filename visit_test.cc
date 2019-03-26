@@ -119,17 +119,24 @@ TEST_CASE("visit, type_table_helpers") {
                type_list<size_t, size_t, size_t>{});
   is_same_test(any_type_table_helper<2, 2>(),
                type_table<type_list<size_t, size_t, size_t, size_t>, 2, 2>{});
-  auto mapped = table_map(any_type_table_helper<2, 2>(), [](auto, auto) -> size_t { return 0u; });
+  auto mapped = table_map(any_type_table_helper<2, 2>(), [](auto, auto) { return type_t<size_t>{}; });
   is_same_test(decltype(mapped)::data{}, type_list<size_t, size_t, size_t, size_t>{});
 }
 
 TEST_CASE("visit, type_table") {
-  constexpr auto ttable = make_type_table<2, 3>([](auto seq) {
-    return std::index_sequence<get<0>(seq), get<1>(seq)>{};
+  {
+    constexpr auto ttable = make_type_table<2, 3>([](auto seq) {
+      return type_t<std::index_sequence<get<0>(seq), get<1>(seq)>>{};
   });
 
   is_same_test(get<0>(ttable), type_t<std::index_sequence<0, 0>>{});
   is_same_test(get<3>(ttable), type_t<std::index_sequence<1, 0>>{});
+  }
+  {
+    constexpr auto t = make_type_table<2, 3>([](auto) { return type_t<int>{}; });
+
+     is_same_test(typename decltype(common_type(t))::type{}, int{});
+  }
 }
 
 TEST_CASE("visit, visit with R") {
@@ -156,6 +163,82 @@ TEST_CASE("visit, visit with R") {
       visit_with_r<void>([](const auto&) { }, v);
       REQUIRE(false);
     } catch (const std::bad_variant_access&) {}
+  }
+}
+
+TEST_CASE("should_enable_visit_no_r") {
+  struct A{};
+  struct B{};
+  using v = std::variant<A, B>;
+  using vr = v&;
+  using vrr = v&&;
+
+  {
+    auto auto_ref_ref_v = [](auto&& ...) {};
+    using op = decltype(auto_ref_ref_v);
+
+    static_assert(should_enable_visit_no_r<op, v, vr>());
+    static_assert(should_enable_visit_no_r<op, v, vr, vrr>());
+  }
+
+  {
+    struct op {
+      void operator()(A&&, A&&) && {}
+      void operator()(A&&, B&&) && {}
+      void operator()(B&&, A&&) && {}
+      void operator()(B&&, B&&) && {}
+    };
+
+    static_assert(!should_enable_visit_no_r<op&&, vr, vrr>());
+    static_assert(should_enable_visit_no_r<op&&, vrr, vrr>());
+    static_assert(!should_enable_visit_no_r<op&&, vr>());
+    static_assert(!should_enable_visit_no_r<op&&, vr, A>());
+    static_assert(!should_enable_visit_no_r<op&&>());
+  }
+}
+
+TEST_CASE("should_enable_visit_r") {
+  struct A{};
+  struct B{};
+  using v = std::variant<A, B>;
+  using vr = v&;
+  using vrr = v&&;
+
+  {
+    auto auto_ref_ref_v = [](auto&& ...) { return 3; };
+    using op = decltype(auto_ref_ref_v);
+
+    static_assert(should_enable_visit_r<int, op, v, vr>());
+    static_assert(should_enable_visit_r<int, op, v, vr, vrr>());
+    static_assert(!should_enable_visit_r<A, op, v>());
+  }
+
+  {
+    struct op {
+      int operator()(A&&, A&&) && { return 3; }
+      int operator()(A&&, B&&) && { return 3; }
+      int operator()(B&&, A&&) && { return 3; }
+      int operator()(B&&, B&&) && { return 3; }
+    };
+
+    static_assert(!should_enable_visit_r<int, op&&, vr, vrr>());
+    static_assert(should_enable_visit_r<int, op&&, vrr, vrr>());
+    static_assert(!should_enable_visit_r<int, op&&, vr>());
+    static_assert(!should_enable_visit_r<int, op&&, vr, A>());
+    static_assert(!should_enable_visit_r<int, op&&>());
+  }
+}
+
+TEST_CASE("visit_return_type") {
+  struct A{};
+  struct B{};
+  using v = std::variant<A, B>;
+
+  {
+    auto auto_ref_ref_v = [](auto&& ...) { return 3; };
+    using op = decltype(auto_ref_ref_v);
+
+    is_same_test(visit_return_type<op, v&&, v&&>{}, int{});
   }
 }
 
