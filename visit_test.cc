@@ -115,6 +115,8 @@ TEST_CASE("visit, table") {
 }
 
 TEST_CASE("visit, type_table_helpers") {
+  type_list<> empty_list;
+  (void)empty_list;
   is_same_test(any_typelist_helper(std::index_sequence<0, 1, 2>{}),
                type_list<size_t, size_t, size_t>{});
   is_same_test(any_type_table_helper<2, 2>(),
@@ -172,37 +174,6 @@ TEST_CASE("visit, visit with R") {
   }
 }
 
-TEST_CASE("should_enable_visit_no_r") {
-  struct A{};
-  struct B{};
-  using v = std::variant<A, B>;
-  using vr = v&;
-  using vrr = v&&;
-
-  {
-    auto auto_ref_ref_v = [](auto&& ...) {};
-    using op = decltype(auto_ref_ref_v);
-
-    static_assert(should_enable_visit_no_r<op, v, vr>());
-    static_assert(should_enable_visit_no_r<op, v, vr, vrr>());
-  }
-
-  {
-    struct op {
-      void operator()(A&&, A&&) && {}
-      void operator()(A&&, B&&) && {}
-      void operator()(B&&, A&&) && {}
-      void operator()(B&&, B&&) && {}
-    };
-
-    static_assert(!should_enable_visit_no_r<op&&, vr, vrr>());
-    static_assert(should_enable_visit_no_r<op&&, vrr, vrr>());
-    static_assert(!should_enable_visit_no_r<op&&, vr>());
-    static_assert(!should_enable_visit_no_r<op&&, vr, A>());
-    static_assert(!should_enable_visit_no_r<op&&>());
-  }
-}
-
 TEST_CASE("should_enable_visit_r") {
   struct A{};
   struct B{};
@@ -245,6 +216,32 @@ TEST_CASE("visit_return_type") {
     using op = decltype(auto_ref_ref_v);
 
     is_same_test(visit_return_type<op, v&&, v&&>{}, int{});
+  }
+}
+
+TEST_CASE("visit, complete") {
+  {
+    auto op = [](auto&& ...) { return 3; };
+    constexpr std::variant<int, char> v;
+
+    static_assert(tools::visit<int>(op, v) == 3);
+    static_assert(tools::visit(op, v) == 3);
+  }
+  {
+    struct A{};
+    struct B{};
+
+    struct {
+      int operator()(A&&, A&&) && { return 0; }
+      int operator()(A&&, B&&) && { return 1; }
+      int operator()(B&&, A&&) && { return 2; }
+      int operator()(B&&, B&&) && { return 3; }
+    } op;
+
+    std::variant<A, B> v1(A{});
+    std::variant<A, B> v2(B{});
+
+    REQUIRE(tools::visit(std::move(op), std::move(v1), std::move(v2)) == 1);
   }
 }
 

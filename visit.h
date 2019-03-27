@@ -119,12 +119,13 @@ struct common_type_impl {
   using type = null_t;
 };
 
-template <typename ...Ts>
-struct common_type_impl<type_list<Ts...>, std::void_t<std::common_type_t<Ts...>>> {
+template <typename... Ts>
+struct common_type_impl<type_list<Ts...>,
+                        std::void_t<std::common_type_t<Ts...>>> {
   using type = type_t<std::common_type_t<Ts...>>;
 };
 
-template <typename ...Ts>
+template <typename... Ts>
 auto common_type(type_list<Ts...> t) {
   return typename common_type_impl<type_list<Ts...>>::type{};
 }
@@ -182,54 +183,66 @@ struct table_index_math {
 };
 
 template <typename T, size_t... dims>
-struct table : table_index_math<dims...> {
-  static constexpr size_t size_linear = table_index_math<dims...>::size_linear;
+struct table  {
+  using math = table_index_math<dims...>;
+  static constexpr size_t size_linear = math::size_linear;
 
-  using index_a = typename table_index_math<dims...>::index_a;
+  using index_a = typename math::index_a;
 
   template <size_t... idxs>
-  using index_s = typename table_index_math<dims...>::template index_s<idxs...>;
+  using index_s = typename math::template index_s<idxs...>;
 
   std::array<T, size_linear> data;
 
+  static constexpr size_t as_linear(const index_a& idxs) {
+    return math::as_linear(idxs);
+  }
+
+  template <size_t... _idxs>
+  static constexpr size_t as_linear(const index_s<_idxs...>& idxs) {
+    return math::as_linear(idxs);
+  }
+
   constexpr T& operator[](const index_a& idxs) {
-    return data[this->as_linear(idxs)];
+    return data[math::as_linear(idxs)];
   }
 
   constexpr const T& operator[](const index_a& idxs) const {
-    return data[this->as_linear(idxs)];
+    return data[math::as_linear(idxs)];
   }
 
   template <size_t... _idxs>
   constexpr T& operator[](index_s<_idxs...> idxs) {
-    return data[this->as_linear(idxs)];
+    return data[math::as_linear(idxs)];
   }
 
   template <size_t... _idxs>
   constexpr const T& operator[](index_s<_idxs...> idxs) const {
-    return data[this->as_linear(idxs)];
+    return data[math::as_linear(idxs)];
   }
 };
 
-template <typename Table, typename OutTable, typename Op, size_t... from0_to_n>
-constexpr void table_map_helper(const Table& t,
-                                OutTable& out_table,
-                                Op op,
-                                std::index_sequence<from0_to_n...>) {
-  (
-      [&] {
-        constexpr auto multi_s = Table::template as_multi_s<from0_to_n>();
-        out_table.data[from0_to_n] = op(multi_s, t.data[from0_to_n]);
-      }(),
-      ...);
+template <typename OutTable,
+          typename Table,
+          typename Op,
+          size_t... from0_to_n>
+constexpr OutTable table_map_helper(const Table& t,
+                                    Op op,
+                                    std::index_sequence<from0_to_n...>) {
+  using math = typename Table::math;
+  return OutTable{
+    [&] {
+      constexpr auto multi_s = math::template as_multi_s<from0_to_n>();
+      return op(multi_s, t.data[from0_to_n]);
+    }()...
+  };
 }
 
 template <typename T, size_t... dims, typename Op>
 constexpr auto table_map(table<T, dims...> t, Op op) {
   using U = decltype(op(std::index_sequence<dims - 1 ...>{}, t.data[0]));
-  table<U, dims...> res{};
-  table_map_helper(t, res, op, std::make_index_sequence<t.data.size()>{});
-  return res;
+  return table_map_helper<table<U, dims...>>(
+      t, op, std::make_index_sequence<t.data.size()>{});
 }
 
 template <size_t... dims, typename Op>
@@ -250,9 +263,9 @@ template <typename Table, typename Op, size_t... from0_to_n>
 constexpr auto type_table_map_helper(Table,
                                      Op op,
                                      std::index_sequence<from0_to_n...>) {
-  using UTypeList = type_list<
-    typename decltype(op(
-      Table::template as_multi_s<from0_to_n>(), get<from0_to_n>(Table{})))::type...>;
+  using UTypeList =
+      type_list<typename decltype(op(Table::template as_multi_s<from0_to_n>(),
+                                     get<from0_to_n>(Table{})))::type...>;
   return typename Table::template same_dims_table<UTypeList>{};
 }
 
@@ -324,43 +337,19 @@ struct is_variant<std::variant<Ts...>> : std::true_type {};
 template <typename T>
 constexpr bool is_variant_v = is_variant<T>::value;
 
-template <typename FwdOp, typename... FwdVs>
-struct should_enable_visit_no_r_helper {
-  template <size_t... idxs>
-  constexpr bool operator()(std::index_sequence<idxs...>) {
-    return std::is_invocable_v<FwdOp, decltype(std::get<idxs>(
-                                          std::declval<FwdVs>()))...>;
-  }
-};
-
-template <typename FwdOp, typename... FwdVs>
-constexpr bool should_enable_visit_no_r() {
-  if constexpr (!sizeof...(FwdVs) ||(!is_variant_v<std::decay_t<FwdVs>> || ...)) {
-    return false;
-  } else {
-    constexpr should_enable_visit_no_r_helper<FwdOp, FwdVs...> helper;
-
-    constexpr auto for_each_scenario =
-        make_table<std::variant_size_v<std::decay_t<FwdVs>>...>(helper);
-
-    return tools::all_of(for_each_scenario.data.begin(),
-                         for_each_scenario.data.end(),
-                         [](bool x) { return x; });
-  }
-}
-
 template <typename R, typename FwdOp, typename... FwdVs>
 struct should_enable_visit_r_helper {
   template <size_t... idxs>
   constexpr bool operator()(std::index_sequence<idxs...>) {
-    return std::is_invocable_r_v<R, FwdOp, decltype(std::get<idxs>(
-                                          std::declval<FwdVs>()))...>;
+    return std::is_invocable_r_v<
+        R, FwdOp, decltype(std::get<idxs>(std::declval<FwdVs>()))...>;
   }
 };
 
-template <typename R, typename FwdOp, typename ...FwdVs>
+template <typename R, typename FwdOp, typename... FwdVs>
 constexpr bool should_enable_visit_r() {
-  if constexpr (!sizeof...(FwdVs) ||(!is_variant_v<std::decay_t<FwdVs>> || ...)) {
+  if constexpr (!sizeof...(FwdVs) ||
+                (!is_variant_v<std::decay_t<FwdVs>> || ...)) {
     return false;
   } else {
     constexpr should_enable_visit_r_helper<R, FwdOp, FwdVs...> helper;
@@ -374,30 +363,52 @@ constexpr bool should_enable_visit_r() {
   }
 }
 
-
-template <typename FwdOp, typename ...FwdVs>
+template <typename FwdOp, typename... FwdVs>
 struct visit_return_type_mapper {
-  template <size_t ...idxs>
+  template <size_t... idxs>
   constexpr auto operator()(std::index_sequence<idxs...>) {
-    if constexpr (!std::is_invokable_v<FwdOp, FwdVs...>) {
-      return null_t{};
+    if constexpr ((!is_variant_v<std::decay_t<FwdVs>> || ...)) {
+      return type_t<null_t>{};
+    } else if constexpr (!std::is_invocable_v<FwdOp,
+                                              decltype(std::get<idxs>(
+                                                  std::declval<FwdVs>()))...>) {
+      return type_t<null_t>{};
     } else {
-      return type_t<decltype(std::declval<FwdOp>()(std::declval<FwdVs>()...))>{};
+      return type_t<decltype(
+          std::declval<FwdOp>()(std::get<idxs>(std::declval<FwdVs>())...))>{};
     }
   }
 };
 
-template <typename FwdOp, typename ...FwdVs>
-constexpr auto visit_return_types_helper () {
+template <typename FwdOp, typename... FwdVs>
+constexpr auto visit_return_types_helper() {
   constexpr visit_return_type_mapper<FwdOp, FwdVs...> mapper;
-  constexpr auto result_table = make_type_table<
-      std::variant_size_v<std::decay_t<FwdVs>>...
-    >(mapper);
+  constexpr auto result_table =
+      make_type_table<std::variant_size_v<std::decay_t<FwdVs>>...>(mapper);
+
   return tools::common_type(typename decltype(result_table)::data{});
 }
 
-template <typename FwdOp, typename ...FwdVs>
-using visit_return_type = typename decltype((visit_return_types_helper<FwdOp, FwdVs...>()))::type;
+template <typename FwdOp, typename... FwdVs>
+using visit_return_type =
+    typename decltype((visit_return_types_helper<FwdOp, FwdVs...>()))::type;
 
+template <typename R, typename Op, typename... Vs>
+constexpr auto visit(Op&& op, Vs&&... vs) -> std::enable_if_t<
+    should_enable_visit_r<R,
+                          decltype(std::forward<Op>(op)),
+                          decltype(std::forward<Vs>(vs))...>(),
+    R> {
+  return visit_with_r<R>(std::forward<Op>(op), std::forward<Vs>(vs)...);
+}
+
+template <typename Op, typename... Vs>
+constexpr auto visit(Op&& op, Vs&&... vs)
+    -> visit_return_type<decltype(std::forward<Op>(op)),
+                         decltype(std::forward<Vs>(vs))...> {
+  using R = visit_return_type<decltype(std::forward<Op>(op)),
+                              decltype(std::forward<Vs>(vs))...>;
+  return visit_with_r<R>(std::forward<Op>(op), std::forward<Vs>(vs)...);
+}
 
 }  // namespace tools
