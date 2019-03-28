@@ -20,7 +20,7 @@ constexpr void visit(F f, const std::variant<Ts...>& v) {
   using signature = void (*)(F, const std::variant<Ts...>&);
 
   // clang-format off
-  signature vtable[] {
+  constexpr signature vtable[] {
       [](F f, const std::variant<Ts...>& v) { f(std::get<Ts>(v)); } ...
   };
   // clang-format on
@@ -71,18 +71,19 @@ using ValueType = typename std::iterator_traits<I>::value_type;
 template <typename I>
 // requires InputIterator<I>
 class varying_notation {
-  I f_;
-  I l_;
+  I powers_f_;
+  I powers_l_;
 
  public:
-  constexpr varying_notation(I f, I l) : f_{f}, l_{l} {}
+  constexpr varying_notation(I powers_f, I powers_l)
+      : powers_f_{powers_f}, powers_l_{powers_l} {}
 
   template <typename T, typename O>
-  // requires Number<T>
+  // requires Number<T> && OutputIterator<O>
   constexpr O to(T number, O o) const {
-    for (I f = f_; f != l_; ++f) {
-      *o++ = number / *f;
-      number %= *f;
+    for (I power_i = powers_f_; power_i != powers_l_; ++power_i) {
+      *o++ = number / *power_i;
+      number %= *power_i;
     }
     return o;
   }
@@ -90,7 +91,7 @@ class varying_notation {
   template <typename I2>
   // requires InputIterator<I2>
   constexpr ValueType<I2> from(I2 f, I2 l) const {
-    return inner_product(f, l, f_, ValueType<I2>{0});
+    return inner_product(f, l, powers_f_, ValueType<I2>{0});
   }
 };
 
@@ -183,7 +184,7 @@ struct table_index_math {
 };
 
 template <typename T, size_t... dims>
-struct table  {
+struct table {
   using math = table_index_math<dims...>;
   static constexpr size_t size_linear = math::size_linear;
 
@@ -222,20 +223,15 @@ struct table  {
   }
 };
 
-template <typename OutTable,
-          typename Table,
-          typename Op,
-          size_t... from0_to_n>
+template <typename OutTable, typename Table, typename Op, size_t... from0_to_n>
 constexpr OutTable table_map_helper(const Table& t,
                                     Op op,
                                     std::index_sequence<from0_to_n...>) {
   using math = typename Table::math;
-  return OutTable{
-    [&] {
-      constexpr auto multi_s = math::template as_multi_s<from0_to_n>();
-      return op(multi_s, t.data[from0_to_n]);
-    }()...
-  };
+  return OutTable{[&] {
+    constexpr auto multi_s = math::template as_multi_s<from0_to_n>();
+    return op(multi_s, t.data[from0_to_n]);
+  }()...};
 }
 
 template <typename T, size_t... dims, typename Op>
@@ -310,6 +306,18 @@ struct visit_vtable_generator {
     };
   }
 };
+
+template <typename R, typename Op, typename... Vs>
+constexpr R visit_with_r_simplified(Op&& op, Vs&&... vs) {
+  constexpr visit_vtable_generator<R, decltype(std::forward<Op>(op)),
+                                   decltype(std::forward<Vs>(vs))...>
+      vtable_generator;
+
+  constexpr auto vtable =
+      make_table<std::variant_size_v<std::decay_t<Vs>>...>(vtable_generator);
+
+  return vtable[{vs.index()...}](std::forward<Op>(op), std::forward<Vs>(vs)...);
+}
 
 template <typename R, typename Op, typename... Vs>
 constexpr R visit_with_r(Op&& op, Vs&&... vs) {

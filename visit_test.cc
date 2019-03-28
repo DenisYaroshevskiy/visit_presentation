@@ -147,6 +147,18 @@ TEST_CASE("visit, type_table") {
   }
 }
 
+TEST_CASE("visit, visit with R simplified") {
+  {
+    using test_t = std::variant<int, char>;
+
+    constexpr auto visitor =
+        overload{[](int, int) { return 0; }, [](int, char) { return 1; },
+                 [](char, int) { return 2; }, [](char, char) { return 3; }};
+
+    static_assert(visit_with_r_simplified<int>(visitor, test_t{3}, test_t{'a'}) == 1);
+  }
+}
+
 TEST_CASE("visit, visit with R") {
   {
     using test_t = std::variant<int, char>;
