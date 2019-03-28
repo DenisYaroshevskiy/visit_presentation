@@ -70,30 +70,29 @@ using ValueType = typename std::iterator_traits<I>::value_type;
 
 template <typename I>
 // requires InputIterator<I>
-class varying_notation {
-  I powers_f_;
-  I powers_l_;
-
- public:
-  constexpr varying_notation(I powers_f, I powers_l)
-      : powers_f_{powers_f}, powers_l_{powers_l} {}
+struct varying_notation {
+  I pow_f;
+  I pow_l;
 
   template <typename T, typename O>
   // requires Number<T> && OutputIterator<O>
   constexpr O to(T number, O o) const {
-    for (I power_i = powers_f_; power_i != powers_l_; ++power_i) {
-      *o++ = number / *power_i;
-      number %= *power_i;
+    for (I pow_i = pow_f; pow_i != pow_l; ++pow_i) {
+      *o++ = number / *pow_i;
+      number %= *pow_i;
     }
     return o;
   }
 
   template <typename I2>
   // requires InputIterator<I2>
-  constexpr ValueType<I2> from(I2 f, I2 l) const {
-    return inner_product(f, l, powers_f_, ValueType<I2>{0});
+  constexpr ValueType<I2> from(I2 f) const {
+    return inner_product(pow_f, pow_l, f, ValueType<I2>{0});
   }
 };
+
+template <typename I>
+varying_notation(I, I) -> varying_notation<I>;
 
 template <typename T>
 struct type_t {
@@ -152,12 +151,12 @@ struct table_index_math {
   using index_s = std::index_sequence<idxs...>;
 
   static constexpr size_t size_linear = (dims * ...);
-  static constexpr std::array multipliers_a = compute_multipliers_a<dims...>();
-  static constexpr varying_notation notation{std::begin(multipliers_a),
-                                             std::end(multipliers_a)};
+  static constexpr index_a multipliers_a = compute_multipliers_a<dims...>();
+  static constexpr varying_notation notation{multipliers_a.begin(),
+                                             multipliers_a.end()};
 
   static constexpr size_t as_linear(const index_a& arr) {
-    return notation.from(arr.begin(), arr.end());
+    return notation.from(arr.begin());
   }
 
   template <size_t... idxs>
