@@ -4,30 +4,72 @@
 namespace v2 {
 namespace tools {
 
-struct _error_base {};
-
-template <typename ...>
-struct error : _error_base {};
-
+// type as value staff
+// ----------------------------------------------------------
 
 template <typename T>
-constexpr bool is_error_v = std::is_base_of_v<_error_base, T>;
+struct type_ {
+  using type = T;
+};
+
+struct error_base {};
+
+template <typename T>
+constexpr bool is_error_v = std::is_base_of_v<error_base, T>;
+
+// Typelist --------------------------------------------------------
+
+template <size_t idx, typename T>
+struct _indexed_type {};
+
+template <typename...>
+struct _type_list_impl;
+
+template <size_t... from0_to_n, typename... Ts>
+struct _type_list_impl<std::index_sequence<from0_to_n...>, Ts...>
+    : _indexed_type<from0_to_n, Ts>... {};
+
+template <typename... Ts>
+struct type_list : _type_list_impl<std::index_sequence_for<Ts...>, Ts...> {
+  static constexpr std::size_t size() { return sizeof...(Ts); }
+};
+
+template <size_t idx, typename T>
+constexpr type_<T> _get_success(const _indexed_type<idx, T>&) {
+  return {};
+}
+
+template <size_t idx, typename Where>
+struct index_is_out_of_bounds : error_base {};
+
+template <size_t idx, typename... Ts>
+constexpr auto get(type_list<Ts...>) {
+  using List = type_list<Ts...>;
+
+  constexpr List t;
+  if constexpr (idx < t.size()) {
+    return _get_success<idx>(t);
+  } else {
+    return index_is_out_of_bounds<idx, List>{};
+  }
+}
 
 /*
 
 struct null_{
-    friend constexpr std::bool_constant<true> operator==(null_, null_) { return {}; }
-    friend constexpr std::bool_constant<false> operator!=(null_, null_) { return {}; }
+    friend constexpr std::bool_constant<true> operator==(null_, null_) { return
+{}; } friend constexpr std::bool_constant<false> operator!=(null_, null_) {
+return {}; }
 
     template <typename T>
-    friend constexpr std::bool_constant<false> operator==(const T&, null_) { return {}; }
-    template <typename T>
-    friend constexpr std::bool_constant<false> operator==(null_, const T&) { return {}; }
+    friend constexpr std::bool_constant<false> operator==(const T&, null_) {
+return {}; } template <typename T> friend constexpr std::bool_constant<false>
+operator==(null_, const T&) { return {}; }
 
     template <typename T>
-    friend constexpr std::bool_constant<true> operator!=(const T&, null_) { return {}; }
-    template <typename T>
-    friend constexpr std::bool_constant<true> operator!=(null_, const T&) { return {}; }
+    friend constexpr std::bool_constant<true> operator!=(const T&, null_) {
+return {}; } template <typename T> friend constexpr std::bool_constant<true>
+operator!=(null_, const T&) { return {}; }
 };
 
 template <size_t i>
@@ -47,7 +89,8 @@ template <typename ...>
 struct _type_list_impl;
 
 template <size_t...from0_to_n, typename ...Ts>
-struct _type_list_impl<std::index_sequence<from0_to_n...>, Ts...> : _type_list_element<i, Ts> ... {};
+struct _type_list_impl<std::index_sequence<from0_to_n...>, Ts...> :
+_type_list_element<i, Ts> ... {};
 
 template <size_t i, typename T>
 type_<T> _get_element(const _type_list_element<i, T>&) { return {}; }
@@ -99,13 +142,11 @@ constexpr auto common_type(type_list<Ts...>) {
 }
 
 template <typename T, size_t size, typename Op, size_t ... from0_to_n>
-auto _cfmap_array(std::array<T, size> x, Op op, std::index_sequence<from0_to_n...>) {
-    constexpr auto res_value_type = common_type(type_<decltype(op(x[from0_to_n]))>{}...);
-    if constexpr (res_value_type == null_{}) {
-        return null_{};
-    } else {
-        return std::array<res_value_type, size> {
-            op(x[from0_to_n])...
+auto _cfmap_array(std::array<T, size> x, Op op,
+std::index_sequence<from0_to_n...>) { constexpr auto res_value_type =
+common_type(type_<decltype(op(x[from0_to_n]))>{}...); if constexpr
+(res_value_type == null_{}) { return null_{}; } else { return
+std::array<res_value_type, size> { op(x[from0_to_n])...
         };
     }
 }
