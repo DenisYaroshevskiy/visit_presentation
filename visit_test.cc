@@ -36,7 +36,7 @@ TEST_CASE("visit, simplified") {
 TEST_CASE("visit, table_index_math") {
   constexpr table_index_math<3, 4, 2> t{};
   static_assert(t.size_linear == 3 * 4 * 2);
-  REQUIRE(t.multipliers_a == std::array<size_t, 3>{4 * 2, 2, 1});
+  REQUIRE(t.powers_a == std::array<size_t, 3>{4 * 2, 2, 1});
 
   REQUIRE(t.as_linear({2, 3, 1}) == 3 * 4 * 2 - 1);
   static_assert(t.as_linear(std::index_sequence<2, 3, 1>{}) == 23);

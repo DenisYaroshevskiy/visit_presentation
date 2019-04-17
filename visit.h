@@ -92,7 +92,7 @@ struct varying_notation {
 };
 
 template <typename I>
-varying_notation(I, I) -> varying_notation<I>;
+varying_notation(I, I)->varying_notation<I>;
 
 template <typename T>
 struct type_t {
@@ -114,6 +114,11 @@ struct type_list_impl<std::index_sequence<idxs...>, Ts...>
 template <typename... Ts>
 struct type_list : type_list_impl<std::index_sequence_for<Ts...>, Ts...> {};
 
+template <size_t I, typename T>
+constexpr type_t<T> get(const indexed_t<T, I>&) {
+  return {};
+}
+
 template <typename, typename = void>
 struct common_type_impl {
   using type = null_t;
@@ -130,13 +135,8 @@ auto common_type(type_list<Ts...> t) {
   return typename common_type_impl<type_list<Ts...>>::type{};
 }
 
-template <size_t I, typename T>
-constexpr type_t<T> get(const indexed_t<T, I>&) {
-  return {};
-}
-
 template <size_t... dims>
-constexpr auto compute_multipliers_a() {
+constexpr auto compute_powers_a() {
   std::array res{dims...};
   running_sum_shifted(res.rbegin(), res.rend(), res.rbegin(), 1,
                       std::multiplies<>{});
@@ -151,9 +151,8 @@ struct table_index_math {
   using index_s = std::index_sequence<idxs...>;
 
   static constexpr size_t size_linear = (dims * ...);
-  static constexpr index_a multipliers_a = compute_multipliers_a<dims...>();
-  static constexpr varying_notation notation{multipliers_a.begin(),
-                                             multipliers_a.end()};
+  static constexpr index_a powers_a = compute_powers_a<dims...>();
+  static constexpr varying_notation notation{powers_a.begin(), powers_a.end()};
 
   static constexpr size_t as_linear(const index_a& arr) {
     return notation.from(arr.begin());
@@ -223,7 +222,7 @@ struct table {
 };
 
 template <typename OutTable, typename Table, typename Op, size_t... from0_to_n>
-constexpr OutTable table_map_helper(const Table& t,
+constexpr OutTable table_map_helper(Table t,
                                     Op op,
                                     std::index_sequence<from0_to_n...>) {
   using math = typename Table::math;
@@ -328,8 +327,8 @@ constexpr R visit_with_r(Op&& op, Vs&&... vs) {
       make_table<std::variant_size_v<std::decay_t<Vs>>...>(vtable_generator);
 
   size_t idx = vtable.as_linear({vs.index()...});
-  if (idx >= vtable.size_linear) {
-    throw std::bad_variant_access{};
+  if (idx >= vtable.data.size()) {
+    idx = 0;
   }
 
   return vtable.data[idx](std::forward<Op>(op), std::forward<Vs>(vs)...);
@@ -393,7 +392,7 @@ constexpr auto visit_return_types_helper() {
   constexpr auto result_table =
       make_type_table<std::variant_size_v<std::decay_t<FwdVs>>...>(mapper);
 
-  return tools::common_type(typename decltype(result_table)::data{});
+  return tools::common_type(result_table);
 }
 
 template <typename FwdOp, typename... FwdVs>

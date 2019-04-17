@@ -1,0 +1,1 @@
+clang++-mp-7.0 --std=c++17 -O3 -Wall -Werror  visit2_test.cc
