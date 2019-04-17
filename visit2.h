@@ -1,8 +1,21 @@
+#include <algorithm>
 #include <array>
 #include <type_traits>
 
 namespace v2 {
 namespace tools {
+
+// standard algorithms but constexpr -----------------------
+
+template <typename I, typename V>
+constexpr I find(I f, I l, const V& v) {
+  while (f != l) {
+    if (*f == v)
+      break;
+    ++f;
+  }
+  return f;
+}
 
 // type as value staff
 // ----------------------------------------------------------
@@ -16,6 +29,15 @@ struct error_base {};
 
 template <typename T>
 constexpr bool is_error_v = std::is_base_of_v<error_base, T>;
+
+template <typename T>
+auto unwrap(T x) {
+  if constexpr (is_error_v<T>) {
+    return x;
+  } else {
+    return typename T::type{};
+  }
+}
 
 // Typelist --------------------------------------------------------
 
@@ -52,6 +74,21 @@ constexpr auto get(type_list<Ts...>) {
   } else {
     return index_is_out_of_bounds<idx, List>{};
   }
+}
+
+template <typename... Ts>
+constexpr size_t _find_index_of_first_error(type_list<Ts...>) {
+  constexpr std::array checks{is_error_v<Ts>...};
+
+  return static_cast<size_t>(find(checks.begin(), checks.end(), true) -
+                             checks.begin());
+}
+
+template <typename... Ts>
+constexpr auto get_first_error(type_list<Ts...>) {
+  constexpr type_list<Ts...> t;
+  constexpr size_t error_idx = _find_index_of_first_error(t);
+  return unwrap(get<error_idx>(t));
 }
 
 /*
