@@ -78,17 +78,48 @@ constexpr auto get(type_list<Ts...>) {
 
 template <typename... Ts>
 constexpr size_t _find_index_of_first_error(type_list<Ts...>) {
-  constexpr std::array checks{is_error_v<Ts>...};
+  constexpr type_list<Ts...> t;
+  if constexpr (!t.size()) {
+    return 0;
+  } else {
+    constexpr std::array checks{is_error_v<Ts>...};
 
-  return static_cast<size_t>(find(checks.begin(), checks.end(), true) -
-                             checks.begin());
+    return static_cast<size_t>(find(checks.begin(), checks.end(), true) -
+                               checks.begin());
+  }
 }
+
+struct no_errors_found {};
 
 template <typename... Ts>
 constexpr auto get_first_error(type_list<Ts...>) {
   constexpr type_list<Ts...> t;
   constexpr size_t error_idx = _find_index_of_first_error(t);
-  return unwrap(get<error_idx>(t));
+  if constexpr (error_idx < t.size()) {
+    return unwrap(get<error_idx>(t));
+  } else {
+    return no_errors_found{};
+  }
+}
+
+template <typename T, typename = void>
+struct _common_type_exists : std::false_type {};
+
+template <typename... Ts>
+struct _common_type_exists<type_list<Ts...>,
+                           std::void_t<std::common_type_t<Ts...>>>
+    : std::true_type {};
+
+template <typename... Ts>
+struct no_common_type : error_base {};
+
+template <typename... Ts>
+constexpr auto common_type(type_list<Ts...>) {
+  if constexpr (!_common_type_exists<type_list<Ts...>>{}) {
+    return no_common_type<Ts...>{};
+  } else {
+    return type_<std::common_type_t<Ts...>>{};
+  }
 }
 
 /*

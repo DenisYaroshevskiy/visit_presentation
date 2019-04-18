@@ -35,6 +35,26 @@ TEST_CASE("visit2.type_list.get_first_error") {
     using List = type_list<int, some_error, double, other_error, float>;
     is_same_test(get_first_error(List{}), some_error{});
   }
+  {
+    using List = type_list<>;
+    is_same_test(get_first_error(List{}), no_errors_found{});
+  }
+}
+
+TEST_CASE("visit2.common_type") {
+  {
+    using List = type_list<int, char>;
+    is_same_test(common_type(List{}), type_<int>{});
+  }
+  {
+    using List = type_list<>;
+    is_same_test(common_type(List{}), no_common_type<>{});
+  }
+  {
+    struct A{};
+    using List = type_list<int, A>;
+    is_same_test(common_type(List{}), no_common_type<int, A>{});
+  }
 }
 
 }  // namespace
