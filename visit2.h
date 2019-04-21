@@ -31,7 +31,7 @@ template <typename T>
 constexpr bool is_error_v = std::is_base_of_v<error_base, T>;
 
 template <typename T>
-auto unwrap(T x) {
+constexpr auto unwrap(T x) {
   if constexpr (is_error_v<T>) {
     return x;
   } else {
@@ -115,12 +115,44 @@ struct no_common_type : error_base {};
 
 template <typename... Ts>
 constexpr auto common_type(type_list<Ts...>) {
-  if constexpr (!_common_type_exists<type_list<Ts...>>{}) {
+  constexpr type_list<Ts...> t;
+  constexpr auto error = get_first_error(t);
+  if constexpr (is_error_v<decltype(error)>) {
+    return error;
+  } else if constexpr (!_common_type_exists<type_list<Ts...>>{}) {
     return no_common_type<Ts...>{};
   } else {
     return type_<std::common_type_t<Ts...>>{};
   }
 }
+
+template <size_t i>
+struct index_ : std::integral_constant<size_t, i> {};
+
+template <typename Op, size_t... from0_to_n>
+constexpr auto _make_type_list(Op op, std::index_sequence<from0_to_n...>) {
+  constexpr type_list<decltype(unwrap(op(index_<from0_to_n>{})))...> t{};
+  constexpr auto error = get_first_error(t);
+  if constexpr (is_error_v<decltype(error)>) {
+    return error;
+  } else {
+    return t;
+  }
+}
+
+template <size_t size, typename Op>
+constexpr auto make_type_list(Op op) {
+  return _make_type_list(op, std::make_index_sequence<size>{});
+}
+
+/*
+
+auto _visit(Op&& op, Vs&& ...vs) {
+  using return_type = _visit_return_type<decltype(std::forward<Op>(op)),
+decltype(std::forward<Vs>(vs)) ...>;
+
+}
+*/
 
 /*
 

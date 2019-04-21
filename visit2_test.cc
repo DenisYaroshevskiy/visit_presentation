@@ -51,9 +51,38 @@ TEST_CASE("visit2.common_type") {
     is_same_test(common_type(List{}), no_common_type<>{});
   }
   {
-    struct A{};
+    struct A {};
     using List = type_list<int, A>;
     is_same_test(common_type(List{}), no_common_type<int, A>{});
+  }
+  {
+    using List = type_list<char, short>;
+    is_same_test(common_type(List{}), type_<int>{});
+  }
+}
+
+TEST_CASE("visit2.make_type_list") {
+  {
+    constexpr auto t =
+        make_type_list<3>([](auto idx) { return type_<decltype(idx)>{}; });
+
+    is_same_test(t, type_list<index_<0>, index_<1>, index_<2>>{});
+  }
+  {
+    constexpr auto t = make_type_list<3>([](auto _idx) {
+      constexpr decltype(_idx) idx;
+      if constexpr (idx == 0) {
+        return some_error{};
+      } else {
+        return type_<decltype(idx)>{};
+      }
+    });
+
+    is_same_test(t, some_error{});
+  }
+  {
+    constexpr auto t = make_type_list<0>([](auto) { return type_<int>{}; });
+    is_same_test(t, type_list<>{});
   }
 }
 
