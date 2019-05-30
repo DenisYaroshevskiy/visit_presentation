@@ -31,6 +31,11 @@ template <typename T>
 constexpr bool is_error_v = std::is_base_of_v<error_base, T>;
 
 template <typename T>
+constexpr auto is_error_f(const T) -> std::bool_constant<is_error_v<T>> {
+  return {};
+}
+
+template <typename T>
 constexpr auto unwrap(T x) {
   if constexpr (is_error_v<T>) {
     return x;
@@ -66,13 +71,11 @@ struct index_is_out_of_bounds : error_base {};
 
 template <size_t idx, typename... Ts>
 constexpr auto get(type_list<Ts...>) {
-  using List = type_list<Ts...>;
-
-  constexpr List t;
+  constexpr type_list<Ts...> t;
   if constexpr (idx < t.size()) {
     return _get_success<idx>(t);
   } else {
-    return index_is_out_of_bounds<idx, List>{};
+    return index_is_out_of_bounds<idx, decltype(t)>{};
   }
 }
 
@@ -116,8 +119,7 @@ struct no_common_type : error_base {};
 template <typename... Ts>
 constexpr auto common_type(type_list<Ts...>) {
   constexpr type_list<Ts...> t;
-  constexpr auto error = get_first_error(t);
-  if constexpr (is_error_v<decltype(error)>) {
+  if constexpr (auto error = get_first_error(t); is_error_f(error)) {
     return error;
   } else if constexpr (!_common_type_exists<type_list<Ts...>>{}) {
     return no_common_type<Ts...>{};
@@ -132,8 +134,7 @@ struct index_ : std::integral_constant<size_t, i> {};
 template <typename Op, size_t... from0_to_n>
 constexpr auto _make_type_list(Op op, std::index_sequence<from0_to_n...>) {
   constexpr type_list<decltype(unwrap(op(index_<from0_to_n>{})))...> t{};
-  constexpr auto error = get_first_error(t);
-  if constexpr (is_error_v<decltype(error)>) {
+  if constexpr (auto error = get_first_error(t); is_error_f(error)) {
     return error;
   } else {
     return t;
@@ -143,6 +144,26 @@ constexpr auto _make_type_list(Op op, std::index_sequence<from0_to_n...>) {
 template <size_t size, typename Op>
 constexpr auto make_type_list(Op op) {
   return _make_type_list(op, std::make_index_sequence<size>{});
+}
+
+template <size_t size, typename Op, size_t... from0_to_n>
+constexpr auto _make_array(Op op, std::index_sequence<from0_to_n...>) {
+  if constexpr (auto types = make_type_list<size>(op); is_error_f(types)) {
+    return types;
+  } else if constexpr (auto result_tv = common_type(types);
+                       is_error_f(result_tv)) {
+    return result_tv;
+  } else {
+    using R = typename decltype(result_tv)::type;
+    return std::array<R, size> {
+      static_cast<R>(op(index_<from0_to_n>{})) ...
+    };
+  }
+}
+
+template <size_t size, typename Op>
+constexpr auto make_array(Op op) {
+  return _make_array<size>(op, std::make_index_sequence<size>{});
 }
 
 /*
