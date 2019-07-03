@@ -48,8 +48,11 @@ template <size_t... dims> struct index_conversions {
   };
 };
 
+template <class Fop, class ...Fvs
+
 template <class R, class Fop, class... Fvs> struct _visit_r_impl {
   using vtable_entry = R (*)(Fop, Fvs...);
+
 
   template <size_t... idxs> struct vtable_generator {
     constexpr vtable_entry operator()(idxs_<idxs...>) {
@@ -67,6 +70,12 @@ template <class... Ts> auto make_types() {
     return error{};
   else
     return types<Ts...>{};
+}
+
+template <class Fop, class ...Fws>
+auto all_return_types() {
+  constexpr index_conversions<
+  std::variant_size_v<std::decay<Fws>
 }
 
 template <class... Ts> type_<std::common_type_t<Ts...>> _common(types<Ts...>);

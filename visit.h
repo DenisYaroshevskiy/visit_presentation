@@ -20,7 +20,7 @@ constexpr void visit(F f, const std::variant<Ts...>& v) {
   using signature = void (*)(F, const std::variant<Ts...>&);
 
   // clang-format off
-  constexpr signature vtable[] {
+  static constexpr signature vtable[] {
       [](F f, const std::variant<Ts...>& v) { f(std::get<Ts>(v)); } ...
   };
   // clang-format on
@@ -397,7 +397,7 @@ constexpr auto visit_return_types_helper() {
 
 template <typename FwdOp, typename... FwdVs>
 using visit_return_type =
-    typename decltype((visit_return_types_helper<FwdOp, FwdVs...>()))::type;
+    typename decltype(visit_return_types_helper<FwdOp, FwdVs...>())::type;
 
 template <typename R, typename Op, typename... Vs>
 constexpr auto visit(Op&& op, Vs&&... vs) -> std::enable_if_t<
